@@ -198,6 +198,9 @@ function set_build_dir() {
     local index
     index=1
     target_list=($(find . -maxdepth 1 -type d \( -name "${1}*" -o -name "${1^^}*" \) -exec basename {} \;))
+    if [ "${1}" == "target"  ]; then
+        target_list+=($(find . -maxdepth 1 -type d \( -name "vendor*" -o -name "VENDOR*" \) -exec basename {} \;))
+    fi
     if [ "${#target_list[@]}" -eq 0 ]; then
         echo "No ${1} build path found on current directory ${PWD}"
         exit 1
