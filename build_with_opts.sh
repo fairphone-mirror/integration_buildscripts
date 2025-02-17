@@ -289,7 +289,7 @@ function set_build_state() {
         (tail -n 100 "${LOGGING_MAPPING[${subsystem}]}" | grep -q "#### build completed successfully") && result=0
         ;;
     amss)
-        (tail -n 50 "${LOGGING_MAPPING[${subsystem}]}" | grep -q "Saving cmm script.") && result=0
+        (tail -n 100 "${LOGGING_MAPPING[${subsystem}]}" | grep -q "Saving cmm script.") && result=0
         ;;
     merge)
         (tail -n 5 "${LOGGING_MAPPING[${subsystem}]}" | grep -q -E "INFO\s+: Completed Successfully!") && result=0
