@@ -287,6 +287,7 @@ function set_build_state() {
         ;;
     qssi|vendor)
         (tail -n 100 "${LOGGING_MAPPING[${subsystem}]}" | grep -q "#### build completed successfully") && result=0
+        (tail -n 20 "${LOGGING_MAPPING[${subsystem}]}" | grep -q "[build.sh]: FAILED:") && result=1
         ;;
     amss)
         (tail -n 100 "${LOGGING_MAPPING[${subsystem}]}" | grep -q "Saving cmm script.") && result=0
