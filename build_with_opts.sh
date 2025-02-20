@@ -405,13 +405,13 @@ function collect_images() {
     SUBSYSTEM_STATES["copy"]="Success"
     package_image_list=($(xmlstarlet sel -t -m "//partition" -n -v @filename "${PARTITION_TABLE}" | sort | uniq))
     pushd "Images" >/dev/null || exit 2
-    for image in "${package_image_list[@]}" "${GPT_MAIN_FILES[@]}"; do
+    for image in "${package_image_list[@]}" "${GPT_MAIN_FILES[@]}" "target_files_extract.zip"; do
         if [ -f "${AMSS_PRODUCT_OUT}/${image}" ]; then
             command "cp -rf ${AMSS_PRODUCT_OUT}/${image} ${image}"
         elif [ -f "${ANDROID_PRODUCT_OUT}/${image}" ]; then
             command "cp -rf ${ANDROID_PRODUCT_OUT}/${image} ${image}"
         else
-            if (grep -w -q "${image}" <<<"study.tar swversion.mbn"); then
+            if (grep -w -q "${image}" <<<"study.tar swversion.mbn target_files_extract.zip"); then
                 print_info "${image} not found, ignore"
                 continue
             fi
