@@ -24,7 +24,7 @@ GPT_MAIN_FILES=(
 MAX_ALLOWED_JOBS=$(($(nproc) * 3 / 8))
 VALID_PRODUCT_LIST=("volcano" "fps")
 VALID_VARIANT_LIST=("user" "userdebug")
-VALID_SUBSYSTEM_LIST=("amss" "qssi" "target" "merge" "copy")
+VALID_SUBSYSTEM_LIST=("amss" "qssi" "kernel" "vendor" "merge" "copy")
 BACKUP_BINARIES=(
     "ANDROID_QSSI_OUT:system/etc/selinux/plat_mac_permissions.xml"
     "AMSS_ROOT:Milos.LA.2.0/common/build/amss_7635_backup_files.zip"
@@ -42,8 +42,8 @@ BACKUP_BINARIES=(
 usage() {
     echo
     cat <<USAGE
-Usage: build.sh <options> [build subsystem]
-  Example: bash build.sh -p fps -v userdebug all
+Usage: build_with_opts.sh <options> [build subsystem]
+  Example: bash build_with_opts.sh -p fps -v userdebug all
 
 optional arguments:
   -p, --product <product>      product to build. Supported product - volcano, fp6
@@ -55,10 +55,12 @@ optional arguments:
 build subsystem arguments:
   amss        build amss subsystems
   qssi        build qssi part
-  target      build vendor part
+  target      build kernel and vendor
+  kernel      build kernel part
+  vendor      build vendor part
   merge       generate super image
   copy        copy all flash images to Images folder
-  all         build all (qssi + vendor + amss)
+  all         build all (qssi + kernel + vendor + amss)
 USAGE
     exit
 }
@@ -101,7 +103,6 @@ function check_tools() {
     fi
 }
 
-
 function check_build_options() {
     local subsystem
     [ -z "${BUILD_PRODUCT}" ] && print_error "product is not set, please add \"-p\" option and try again" && usage
@@ -117,7 +118,7 @@ function check_build_options() {
         usage
     fi
     for subsystem in "${BUILD_SUBSYSTEM[@]}"; do
-        if [ "${subsystem}" == "all" ]; then
+        if [ "${subsystem}" == "all" ] || [ "${subsystem}" == "target" ]; then
             continue
         fi
         if ! (grep -qw "${subsystem}" <<<"${VALID_SUBSYSTEM_LIST[*]}"); then
@@ -130,16 +131,13 @@ function check_build_options() {
 function set_build_list() {
     local subsystem
     for subsystem in "${BUILD_SUBSYSTEM[@]}"; do
-        if [ "${subsystem}" == "target" ]; then
-            SUBSYSTEM_STATES["kernel"]="Queued"
-            SUBSYSTEM_STATES["vendor"]="Queued"
-        else
-            SUBSYSTEM_STATES["${subsystem}"]="Queued"
-        fi
+        SUBSYSTEM_STATES["${subsystem}"]="Queued"
     done
 }
 
 function parse_options() {
+    local formatted_prefix
+    local subsystem
     TARGET_BUILD_MMITEST="${TARGET_BUILD_MMITEST:-"false"}"
     BUILD_THREADS="${BUILD_THREADS:-${MAX_ALLOWED_JOBS}}"
     while true; do
@@ -178,18 +176,25 @@ function parse_options() {
         usage
     fi
     for subsystem in "${@}"; do
-        BUILD_SUBSYSTEM+=("${subsystem}")
+        if [ "${subsystem}" == "all" ]; then
+            BUILD_SUBSYSTEM=("${VALID_SUBSYSTEM_LIST[@]}")
+            BUILD_BACKGROUND="&"
+            break
+        elif [ "${subsystem}" == "target" ]; then
+            BUILD_SUBSYSTEM+=("kernel" "vendor")
+        else
+            BUILD_SUBSYSTEM+=("${subsystem}")
+        fi
     done
-    if (grep -qw "all" <<<"${BUILD_SUBSYSTEM[*]}"); then
-        BUILD_SUBSYSTEM=("${VALID_SUBSYSTEM_LIST[@]}")
-        BUILD_BACKGROUND="&"
-    fi
     print_info "BUILD_SUBSYSTEM: ${BUILD_SUBSYSTEM[*]}"
     check_build_options
     set_build_list
-    for subsystem in "${!SUBSYSTEM_STATES[@]}"; do
-        print_info "${subsystem}: ${SUBSYSTEM_STATES[${subsystem}]}"
+    print_info "SUBSYSTEM BUILD STATES Start"
+    for subsystem in "${VALID_SUBSYSTEM_LIST[@]}"; do
+        formatted_prefix=$(printf "%-6s" "${subsystem}")
+        echo "${formatted_prefix} : ${SUBSYSTEM_STATES[${subsystem}]}"
     done
+    print_info "SUBSYSTEM BUILD STATES End"
 }
 
 function set_build_dir() {
@@ -197,13 +202,17 @@ function set_build_dir() {
     local ANSWER
     local index
     index=1
-    target_list=($(find . -maxdepth 1 -type d \( -name "${1}*" -o -name "${1^^}*" \) -exec basename {} \;))
-    if [ "${1}" == "target"  ]; then
-        target_list+=($(find . -maxdepth 1 -type d \( -name "vendor*" -o -name "VENDOR*" \) -exec basename {} \;))
+    if [ "${1}" == "target" ]; then
+        target_list=($(find . -maxdepth 1 -type d \( -iname "vendor*" -o -iname "${1}*" \) -exec basename {} \;))
+    else
+        target_list=($(find . -maxdepth 1 -type d -iname "${1}*" -exec basename {} \;))
     fi
     if [ "${#target_list[@]}" -eq 0 ]; then
         echo "No ${1} build path found on current directory ${PWD}"
         exit 1
+    elif [ "${#target_list[@]}" -eq 1 ]; then
+        eval "${1^^}_ROOT=$(realpath "${target_list[0]}")"
+        return 0
     fi
     while true; do
         echo "Please choose ${1} build path:"
@@ -285,7 +294,7 @@ function set_build_state() {
     kernel)
         (tail -n 5 "${LOGGING_MAPPING[${subsystem}]}" | grep -q "ufdt_apply_overlay:") && result=0
         ;;
-    qssi|vendor)
+    qssi | vendor)
         (tail -n 100 "${LOGGING_MAPPING[${subsystem}]}" | grep -q "#### build completed successfully") && result=0
         (tail -n 20 "${LOGGING_MAPPING[${subsystem}]}" | grep -q "[build.sh]: FAILED:") && result=1
         ;;
@@ -294,6 +303,7 @@ function set_build_state() {
         ;;
     merge)
         (tail -n 5 "${LOGGING_MAPPING[${subsystem}]}" | grep -q -E "INFO\s+: Completed Successfully!") && result=0
+        ;;
     esac
 
     if [ "${result}" -eq 0 ]; then
@@ -343,7 +353,7 @@ function build_kernel() {
     else
         KERNEL_TARGET="${TARGET_PRODUCT}"
     fi
-    command "RECOMPILE_KERNEL=1 bash kernel_platform/build/android/prepare_vendor.sh ${KERNEL_TARGET} ${KERNEL_VARIANT} 2>&1 | tee ${LOGGING_MAPPING["kernel"]}"
+    command "RECOMPILE_KERNEL=${RECOMPILE_KERNEL} bash kernel_platform/build/android/prepare_vendor.sh ${KERNEL_TARGET} ${KERNEL_VARIANT} 2>&1 | tee ${LOGGING_MAPPING["kernel"]}"
     popd >/dev/null || exit 2
 }
 
@@ -392,13 +402,14 @@ function collect_images() {
         rm -r "Images"
     fi
     mkdir "Images"
+    SUBSYSTEM_STATES["copy"]="Success"
     package_image_list=($(xmlstarlet sel -t -m "//partition" -n -v @filename "${PARTITION_TABLE}" | sort | uniq))
     pushd "Images" >/dev/null || exit 2
     for image in "${package_image_list[@]}" "${GPT_MAIN_FILES[@]}"; do
         if [ -f "${AMSS_PRODUCT_OUT}/${image}" ]; then
-            command "ln -sf ${AMSS_PRODUCT_OUT}/${image} ${image}"
+            command "cp -rf ${AMSS_PRODUCT_OUT}/${image} ${image}"
         elif [ -f "${ANDROID_PRODUCT_OUT}/${image}" ]; then
-            command "ln -sf ${ANDROID_PRODUCT_OUT}/${image} ${image}"
+            command "cp -rf ${ANDROID_PRODUCT_OUT}/${image} ${image}"
         else
             if (grep -w -q "${image}" <<<"study.tar swversion.mbn"); then
                 print_info "${image} not found, ignore"
@@ -416,7 +427,7 @@ function collect_images() {
             if [ "$backup_path" != "$backup_file" ]; then
                 backup_file=$(eval echo "\$$backup_path/$backup_file")
             fi
-            command "ln -sf ${backup_file} backup/$(basename "${backup_file}")"
+            command "cp -rf ${backup_file} backup/$(basename "${backup_file}")"
         done
     fi
     popd >/dev/null || exit 2
@@ -433,16 +444,17 @@ function build_product() {
     fi
 
     if [ "${SUBSYSTEM_STATES["kernel"]}" == "Queued" ]; then
-        command "TARGET_PRODUCT=${BUILD_PRODUCT} build_kernel ${BUILD_BACKGROUND}"
+        command "TARGET_PRODUCT=${BUILD_PRODUCT} RECOMPILE_KERNEL=1 build_kernel ${BUILD_BACKGROUND}"
+        kernel_pid=$!
+    elif [ "${SUBSYSTEM_STATES["vendor"]}" == "Queued" ] && [ "${SUBSYSTEM_STATES["kernel"]}" == "Disabled" ]; then
+        command "TARGET_PRODUCT=${BUILD_PRODUCT} RECOMPILE_KERNEL=0 build_kernel ${BUILD_BACKGROUND}"
         kernel_pid=$!
     fi
 
     if [ -n "${kernel_pid}" ]; then
         wait ${kernel_pid}
-        set_build_state "kernel"
-        SUBSYSTEM_STATES["target"]=${SUBSYSTEM_STATES["kernel"]}
-        LOGGING_MAPPING["target"]=${LOGGING_MAPPING["kernel"]}
     fi
+    [ "${SUBSYSTEM_STATES["kernel"]}" == "Queued" ] && set_build_state "kernel"
 
     if [ "${SUBSYSTEM_STATES["vendor"]}" == "Queued" ]; then
         command "TARGET_PRODUCT=${BUILD_PRODUCT} build_vendor ${BUILD_BACKGROUND}"
@@ -453,15 +465,13 @@ function build_product() {
 
     if [ -n "${system_pid}" ]; then
         wait ${system_pid}
-        set_build_state "qssi"
     fi
+    [ "${SUBSYSTEM_STATES["qssi"]}" == "Queued" ] && set_build_state "qssi"
 
     if [ -n "${vendor_pid}" ]; then
         wait ${vendor_pid}
-        set_build_state "vendor"
-        SUBSYSTEM_STATES["target"]=${SUBSYSTEM_STATES["kernel"]}
-        LOGGING_MAPPING["target"]=${LOGGING_MAPPING["kernel"]}
     fi
+    [ "${SUBSYSTEM_STATES["vendor"]}" == "Queued" ] && set_build_state "vendor"
 
     [ "${SUBSYSTEM_STATES["merge"]}" == "Queued" ] && build_super
 
@@ -472,31 +482,33 @@ function print_build_status() {
     local subsystem
     local build_result
     local extra_info
+    local formatted_prefix
     print_info "Build status:"
     for subsystem in "${VALID_SUBSYSTEM_LIST[@]}"; do
         unset extra_info
         if [ "${SUBSYSTEM_STATES["$subsystem"]}" != "Queued" ]; then
             case "${SUBSYSTEM_STATES["$subsystem"]}" in
-                "Success")
-                    build_result="Success"
-                    ;;
-                "Failure")
-                    build_result="Failed"
-                    extra_info="; Check log file: ${LOGGING_MAPPING["$subsystem"]}"
-                    ;;
-                "Skipped")
-                    build_result="Skipped"
-                    extra_info="; Skipped due to prior failure"
-                    ;;
-                "Disabled")
-                    build_result="Skipped"
-                    extra_info="; Not enabled"
-                    ;;
-                *)
-                    build_result="Unknown"
-                    ;;
+            "Success")
+                build_result="Success"
+                ;;
+            "Failure")
+                build_result="Failed"
+                extra_info="; Check log file: ${LOGGING_MAPPING["$subsystem"]}"
+                ;;
+            "Skipped")
+                build_result="Skipped"
+                extra_info="; Skipped due to prior failure"
+                ;;
+            "Disabled")
+                build_result="Skipped"
+                extra_info="; Not enabled"
+                ;;
+            *)
+                build_result="Unknown"
+                ;;
             esac
-            echo "build $subsystem : ${SUBSYSTEM_STATES["$subsystem"]}${extra_info}"
+            formatted_prefix=$(printf "%-12s" "build $subsystem")
+            echo "${formatted_prefix} : ${build_result}${extra_info}"
         fi
     done
     if [ "${build_result}" == "Failed" ]; then
