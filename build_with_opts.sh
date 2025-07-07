@@ -27,7 +27,7 @@ VALID_VARIANT_LIST=("user" "userdebug")
 VALID_SUBSYSTEM_LIST=("amss" "qssi" "kernel" "vendor" "merge" "copy")
 BACKUP_BINARIES=(
     "ANDROID_QSSI_OUT:system/etc/selinux/plat_mac_permissions.xml"
-    "AMSS_ROOT:Milos.LA.2.0/common/build/amss_7635_backup_files.zip"
+    "AMSS_ROOT:Milos.LA.2.0.1/common/build/amss_7635_backup_files.zip"
     "AMSS_ROOT:about.html"
     "ANDROID_KERNEL_OUT:vmlinux"
     "ANDROID_KERNEL_OUT:System.map"
@@ -267,7 +267,7 @@ function variables_setup() {
     else
         KERNEL_VARIANT="consolidate"
     fi
-    AMSS_PRODUCT_OUT="${AMSS_ROOT}/Milos.LA.2.0/common/build/ufs"
+    AMSS_PRODUCT_OUT="${AMSS_ROOT}/Milos.LA.2.0.1/common/build/ufs"
     ANDROID_QSSI_OUT="${QSSI_ROOT}/out/target/product/qssi_64"
     if [ "$BUILD_PRODUCT" == "volcano" ]; then
         ANDROID_KERNEL_OUT="${TARGET_ROOT}/device/qcom/${BUILD_PRODUCT}-kernel"
